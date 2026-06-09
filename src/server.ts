@@ -19,29 +19,40 @@ const agentMap: Record<string, EchoAgent> = {
 }
 
 async function handleSms(req: Request): Promise<Response> {
+  console.log(`[SMS] ${req.method} ${req.url}`)
+
   const text = await req.text()
   const params: Record<string, string> = {}
   for (const [k, v] of new URLSearchParams(text)) {
     params[k] = v
   }
+  console.log(`[SMS] From=${params.From} Body=${params.Body}`)
 
   const signature = req.headers.get('X-Twilio-Signature') ?? ''
-  if (!Twilio.validateRequest(TWILIO_AUTH_TOKEN!, signature, req.url, params)) {
+  const proto = req.headers.get('X-Forwarded-Proto') ?? new URL(req.url).protocol.replace(':', '')
+  const validationUrl = req.url.replace(/^https?:\/\//, `${proto}://`)
+  if (!Twilio.validateRequest(TWILIO_AUTH_TOKEN!, signature, validationUrl, params)) {
+    console.log(`[SMS] Signature validation FAILED — sig=${signature} url=${validationUrl}`)
     return new Response('Forbidden', { status: 403 })
   }
+  console.log('[SMS] Signature valid')
 
   const from = params.From ?? ''
   const body = params.Body ?? ''
   const key = buildSessionKey(from)
   const session = await store.get(key)
   const agentId = route({ from, body, channel: 'sms' }, bindings)
+  console.log(`[SMS] Routed to agentId=${agentId}`)
   const agent = agentMap[agentId]
 
   if (!agent) {
+    console.log(`[SMS] No agent found for agentId=${agentId}`)
     return new Response('Agent not found', { status: 500 })
   }
 
+  console.log('[SMS] Calling agent.handle...')
   const reply = await agent.handle(session, body)
+  console.log(`[SMS] Reply: ${reply}`)
 
   return new Response(buildTwimlResponse(reply), {
     status: 200,
@@ -53,9 +64,12 @@ export const server = Bun.serve({
   port: parseInt(process.env.PORT ?? '3000'),
   async fetch(req: Request): Promise<Response> {
     const { pathname } = new URL(req.url)
+    console.log(`[HTTP] ${req.method} ${pathname}`)
     if (req.method === 'POST' && pathname === '/sms') {
       return handleSms(req)
     }
     return new Response('Not Found', { status: 404 })
   },
 })
+
+console.log(`Server listening on port ${server.port}`)
