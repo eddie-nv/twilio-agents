@@ -41,6 +41,21 @@ function post(params: Record<string, string>, sig?: string): Promise<Response> {
   })
 }
 
+function postViaProxy(params: Record<string, string>, forwardedProto: string): Promise<Response> {
+  const localUrl = `${BASE_URL}/sms`
+  const publicUrl = localUrl.replace(/^https?:\/\//, `${forwardedProto}://`)
+  const sig = sign(publicUrl, params)
+  return fetch(localUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'X-Twilio-Signature': sig,
+      'X-Forwarded-Proto': forwardedProto,
+    },
+    body: new URLSearchParams(params).toString(),
+  })
+}
+
 beforeEach(() => {
   mockCreate.mockReset()
   mockCreate.mockResolvedValue({ content: [{ type: 'text', text: 'Mock reply' }] })
@@ -76,6 +91,28 @@ test('any message returns non-empty TwiML with Response and Message tags', async
 
 test('invalid Twilio signature returns 403', async () => {
   const res = await post({ From: '+14155550103', Body: 'hi' }, 'invalid-signature')
+
+  expect(res.status).toBe(403)
+})
+
+test('X-Forwarded-Proto: https — signature validated against https URL (ngrok SSL termination)', async () => {
+  const res = await postViaProxy({ From: '+14155550110', Body: 'hello via proxy' }, 'https')
+
+  expect(res.status).toBe(200)
+})
+
+test('X-Forwarded-Proto: https — wrong signature (signed with http) returns 403', async () => {
+  const localUrl = `${BASE_URL}/sms`
+  const sig = sign(localUrl, { From: '+14155550111', Body: 'bad sig' })
+  const res = await fetch(localUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'X-Twilio-Signature': sig,
+      'X-Forwarded-Proto': 'https',
+    },
+    body: new URLSearchParams({ From: '+14155550111', Body: 'bad sig' }).toString(),
+  })
 
   expect(res.status).toBe(403)
 })
