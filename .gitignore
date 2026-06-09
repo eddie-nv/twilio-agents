@@ -1,0 +1,19 @@
+node_modules/
+dist/
+coverage/
+
+# Environment files — keep only the example template
+.env
+.env.*
+!.env.example
+
+# Session data
+data/sessions/*.jsonl
+
+# Certificates and private keys
+*.pem
+*.key
+*.p12
+
+# macOS metadata
+.DS_Store
